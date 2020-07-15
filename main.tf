@@ -40,7 +40,11 @@ locals {
         s3 = {
           region = data.aws_region.harbor.name
           bucket = module.s3_bucket.this_s3_bucket_id
+
+          # Since docker registry is stupid we need to add region endpoint and credentials.
           regionendpoint = "https://s3.${data.aws_region.harbor.name}.amazonaws.com"
+          accesskey = aws_iam_access_key.harbor.id
+          secretkey = aws_iam_access_key.harbor.secret
         }
       }
     }
@@ -56,6 +60,9 @@ locals {
       serviceAccountName = local.service_account
     }
     registry = {
+      serviceAccountName = local.service_account
+    }
+    core = {
       serviceAccountName = local.service_account
     }
   }
@@ -82,14 +89,29 @@ module "iam" {
   tags = var.tags
 }
 
+
 data "aws_iam_policy_document" "harbor" {
+  statement {
+    actions = ["s3:ListAllMyBuckets"]
+    resources = ["arn:aws:s3:::*"]
+  }
   statement {
     actions = [
       "s3:ListBucket",
-      "s3:PutObject",
-      "s3:GetObject"
+      "s3:GetBucketLocation",
+      "s3:ListBucketMultipartUploads"
     ]
-    resources = [module.s3_bucket.this_s3_bucket_arn, "${module.s3_bucket.this_s3_bucket_arn}/*"]
+    resources = [module.s3_bucket.this_s3_bucket_arn]
+  }
+  statement {
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+      "s3:DeleteObject",
+      "s3:ListMultipartUploadParts",
+      "s3:AbortMultipartUpload"
+    ]
+    resources = ["${module.s3_bucket.this_s3_bucket_arn}/*"]
   }
 }
 
@@ -100,10 +122,26 @@ resource "aws_iam_role_policy" "harbor" {
   policy = data.aws_iam_policy_document.harbor.json
 }
 
+resource "aws_iam_user_policy" "harbor" {
+  name = local.bucket_name
+  # role = module.iam.this_iam_role_name
+  user = aws_iam_user.harbor.name
+  policy = data.aws_iam_policy_document.harbor.json
+}
+
+resource "aws_iam_user" "harbor" {
+  name = local.bucket_name
+  path = "/"
+  tags = var.tags
+}
+
+resource "aws_iam_access_key" "harbor" {
+  user = aws_iam_user.harbor.name
+}
+
 
 module "s3_bucket" {
   source = "terraform-aws-modules/s3-bucket/aws"
-
   bucket_prefix = local.bucket_prefix
   acl           = "private"
   force_destroy = true
