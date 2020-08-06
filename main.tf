@@ -1,4 +1,3 @@
-
 locals {
   chart_name    = "harbor"
   chart_version = var.chart_version
